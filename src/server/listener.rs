@@ -1,30 +1,32 @@
-use super::connection::Connection;
-use std::io;
+use std::io::Error;
+
 use tokio::net::TcpListener;
+use crate::server::Connection;
+
 pub struct RedisServer {
-    address: String,
+    addr: String,
 }
 
 impl RedisServer {
-    pub fn new(address: impl Into<String>) -> Self {
-        Self {
-            address: address.into(),
-        }
+    pub fn new(addr: String) -> Self {
+        RedisServer { addr }
     }
-    pub fn address(&self) -> &str {
-        &self.address
-    }
-    pub async fn run(&self) -> io::Result<()> {
-        let listener: TcpListener = TcpListener::bind(&self.address).await?;
-        println!("Redis server listening on {}", self.address);
+
+    pub async fn start(&self) -> Result<(), Error>{
+        // Logic to start the Redis server
+        println!("Starting Redis server at {}", self.addr); 
+        let listener = TcpListener::bind(&self.addr).await?;
         loop {
-            let (stream, addr) = listener.accept().await?;
-            println!("Accepted connection from {}", addr);
+            let (stream, _) = listener.accept().await?;
+            let mut connection = Connection::new(stream);
+            println!("New client connected: {}", self.addr);
             tokio::spawn(async move {
-                if let Err(e) = Connection::new(stream).process().await {
-                    eprintln!("Connection error: {}", e)
-                }
+                connection.handle().await;
             });
         }
+    }
+
+    pub fn addr(&self) -> &str {
+        &self.addr
     }
 }

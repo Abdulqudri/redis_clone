@@ -1,7 +1,10 @@
 use redis_clone::server::RedisServer;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let server = RedisServer::new("0.0.0.0:8888");
-    server.run().await
+async fn main() {
+    let server = RedisServer::new("127.0.0.1:6379".into());
+    match server.start().await{
+        Ok(_) => println!("Server started successfully"),
+        Err(e) => eprintln!("Error starting server: {}", e),
+    }
 }
