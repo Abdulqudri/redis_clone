@@ -53,15 +53,13 @@ impl RespParser {
             return Err(self.invalid_resp());
         }
         let len = len as usize;
-        let data_start = first_line_end + 2;
-        let data_end = data_start + len;
+        let data_start = first_line_end
+            .checked_add(2)
+            .ok_or_else(|| self.invalid_resp())?;
+        let data_end = data_start
+            .checked_add(len)
+            .ok_or_else(|| self.invalid_resp())?;
 
-        // If the buffer does not even contain the full payload length, it is incomplete
-        if input.len() < data_end {
-            return Err(self.incomplete_resp());
-        }
-
-        // If the payload matches length but missing the terminating CRLF
         if input.len() < data_end + 2 {
             return Err(self.incomplete_resp());
         }
@@ -131,8 +129,6 @@ impl RespParser {
 mod tests {
     use super::*;
 
-    // --- SUCCESS CASES ---
-
     #[test]
     fn parses_simple_string() {
         let parser = RespParser::new();
@@ -186,8 +182,6 @@ mod tests {
         assert_eq!(consumed, 23);
     }
 
-    // --- INCOMPLETE CASES (UnexpectedEof) ---
-
     #[test]
     fn incomplete_empty_bytes() {
         let parser = RespParser::new();
@@ -212,7 +206,6 @@ mod tests {
     #[test]
     fn incomplete_bulk_string_truncated_payload() {
         let parser = RespParser::new();
-        // Missing the last 2 characters of 'hello' and the terminating \r\n
         let err = parser.parse(b"$5\r\nhel").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
     }
@@ -220,7 +213,6 @@ mod tests {
     #[test]
     fn incomplete_bulk_string_missing_terminating_crlf() {
         let parser = RespParser::new();
-        // Has full length 'hello', but hasn't received the ending \r\n
         let err = parser.parse(b"$5\r\nhello").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
     }
@@ -235,17 +227,49 @@ mod tests {
     #[test]
     fn incomplete_array_missing_elements() {
         let parser = RespParser::new();
-        // Says 2 elements, but only provides 1 complete element
         let err = parser.parse(b"*2\r\n$3\r\nGET\r\n").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::UnexpectedEof);
     }
 
-    // --- INVALID/MALFORMED CASES (InvalidData) ---
+    #[test]
+    fn parses_first_message_and_preserves_remaining_bytes() {
+        let parser = RespParser::new();
+
+        let input = b"+OK\r\n:42\r\n";
+
+        let (result, consumed) = parser.parse(input).unwrap();
+
+        assert_eq!(result, RespValue::SimpleString("OK".to_string()));
+
+        assert_eq!(consumed, 5);
+
+        let (result, consumed) = parser.parse(&input[consumed..]).unwrap();
+
+        assert_eq!(result, RespValue::Integer(42));
+        assert_eq!(consumed, 5);
+    }
+
+    #[test]
+    fn parses_nested_array() {
+        let parser = RespParser::new();
+
+        let input = b"*2\r\n:1\r\n*1\r\n$4\r\nPING\r\n";
+
+        let (result, consumed) = parser.parse(input).unwrap();
+
+        let expected = RespValue::Array(Some(vec![
+            RespValue::Integer(1),
+            RespValue::Array(Some(vec![RespValue::BulkString(Some(b"PING".to_vec()))])),
+        ]));
+
+        assert_eq!(result, expected);
+        assert_eq!(consumed, input.len());
+    }
 
     #[test]
     fn invalid_unknown_type_byte() {
         let parser = RespParser::new();
-        let err = parser.parse(b"PING\r\n").unwrap_err(); // Missing leading validation character
+        let err = parser.parse(b"PING\r\n").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidData);
     }
 
